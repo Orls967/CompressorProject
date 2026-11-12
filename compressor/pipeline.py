@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+import threading
 import time
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
@@ -86,12 +87,18 @@ def is_supported(path: Path) -> bool:
     return path.suffix.lower() in SUPPORTED
 
 
+# Memilih nama + memindahkan file harus atomik: dua file bernama sama yang
+# diproses bersamaan tidak boleh saling menimpa hasilnya.
+_PLACE_LOCK = threading.Lock()
+
+
 def _place(tmp_file: Path, src: Path, out_dir: Path, ext: str) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
-    target = unique_path(out_dir, src.stem + SUFFIX, ext)
-    if target.resolve() == src.resolve():  # mustahil karena ada akhiran, tapi dijaga
-        raise RuntimeError("output akan menimpa file asli")
-    shutil.move(str(tmp_file), target)
+    with _PLACE_LOCK:
+        target = unique_path(out_dir, src.stem + SUFFIX, ext)
+        if target.resolve() == src.resolve():  # mustahil karena ada akhiran, tapi dijaga
+            raise RuntimeError("output akan menimpa file asli")
+        shutil.move(str(tmp_file), target)
     return target
 
 
@@ -102,8 +109,9 @@ def _keep_original(res: Result, src: Path, out_dir: Path, why: str) -> Result:
     res.message = why
     if out_dir.resolve() != src.parent.resolve():
         out_dir.mkdir(parents=True, exist_ok=True)
-        target = unique_path(out_dir, src.stem, src.suffix)
-        shutil.copy2(src, target)
+        with _PLACE_LOCK:
+            target = unique_path(out_dir, src.stem, src.suffix)
+            shutil.copy2(src, target)
         res.output, res.output_name = str(target), target.name
         res.message += " — file asli disalin apa adanya"
     else:
@@ -169,7 +177,8 @@ def _friendly(e: Exception) -> str:
     if isinstance(e, pikepdf.PdfError):
         return "File PDF rusak atau bukan PDF yang valid"
     if isinstance(e, zipfile.BadZipFile):
-        return "File rusak atau bukan dokumen Office (DOCX/PPTX/XLSX) yang valid"
+        return ("Dokumen Office tidak bisa dibuka: file rusak atau dilindungi password "
+                "(hapus password-nya dulu di Word/Excel/PowerPoint)")
     if isinstance(e, MemoryError):
         return "Memori tidak cukup untuk memproses file ini"
     return str(e) or type(e).__name__

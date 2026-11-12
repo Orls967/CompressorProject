@@ -6,7 +6,7 @@ File OOXML adalah arsip ZIP. Yang dilakukan:
 2. Foto PNG tanpa transparansi → JPEG. Screenshot/diagram/gambar berisi teks
    tetap PNG (pngquant) supaya teks tidak blur.
 3. Media yang tidak direferensikan, duplikat, dan thumbnail dibuang.
-4. Arsip di-zip ulang dengan deflate level 9.
+4. Arsip di-zip ulang dengan deflate maksimum (zopfli).
 
 Semua bagian XML dokumen (teks, tata letak) disalin byte-per-byte; hanya file
 relasi dan [Content_Types].xml yang disesuaikan saat nama media berubah.
@@ -17,7 +17,6 @@ import hashlib
 import posixpath
 import re
 import zipfile
-import zlib
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,7 +24,7 @@ from typing import Callable
 
 from lxml import etree
 
-from . import images
+from . import deflate, images
 from .presets import Settings
 
 Progress = Callable[[float, str], None]
@@ -450,7 +449,7 @@ def compress_office(src: Path, dst: Path, settings: Settings, progress: Progress
             stats.duplicates_removed += 1
     stats.media_after = sum(len(pkg.parts[n]) for n in current if n not in removed)
 
-    # 6. tulis ulang zip, deflate level 9
+    # 6. tulis ulang zip dengan deflate terbaik
     report(0.9, "menulis arsip")
     for rels_name in pkg.rels_dirty:
         pkg.parts[rels_name] = pkg.serialize(pkg.rels[rels_name])
@@ -465,23 +464,6 @@ def compress_office(src: Path, dst: Path, settings: Settings, progress: Progress
             continue  # tak terpakai / thumbnail / duplikat
         final.append((position[old], name))
     names = [n for _, n in sorted(final)]
-    write_zip(dst, [(n, pkg.parts[n]) for n in names])
+    deflate.write_zip(dst, [(n, pkg.parts[n]) for n in names])
     report(1.0, "selesai")
     return {"stats": stats, "detail": stats.describe()}
-
-
-def write_zip(dst: Path, entries: list[tuple[str, bytes]]) -> None:
-    """ZIP deterministik: deflate level 9, atau STORED kalau deflate tidak membantu."""
-    with zipfile.ZipFile(dst, "w") as z:
-        for name, data in entries:
-            info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
-            info.external_attr = 0o600 << 16
-            method = zipfile.ZIP_DEFLATED
-            if len(data) > 256 and _sniff(data) in ("jpeg", "png"):
-                if len(zlib.compress(data, 9)) >= len(data):
-                    method = zipfile.ZIP_STORED
-            elif not data:
-                method = zipfile.ZIP_STORED
-            info.compress_type = method
-            z.writestr(info, data, compress_type=method,
-                       compresslevel=9 if method == zipfile.ZIP_DEFLATED else None)

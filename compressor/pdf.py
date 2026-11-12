@@ -28,7 +28,7 @@ import pikepdf
 from pikepdf import Array, Dictionary, Name, Stream
 from PIL import Image
 
-from . import deps, images, validate
+from . import deflate, deps, images, validate
 from .presets import Settings
 
 pikepdf.settings.set_flate_compression_level(9)
@@ -546,20 +546,32 @@ def _strip_metadata(pdf: pikepdf.Pdf) -> None:
 
 
 def _recompress_flate(pdf: pikepdf.Pdf, skip: set) -> None:
-    """Deflate ulang level 9 untuk stream tanpa predictor (content stream, font, dll.)."""
+    """Deflate ulang (zopfli) untuk stream tanpa predictor: content stream,
+    font, ToUnicode, dll. Stream yang belum dikompres ikut dikompres di sini
+    supaya tidak jatuh ke zlib bawaan qpdf saat disimpan."""
     for obj in pdf.objects:
         if not isinstance(obj, Stream) or obj.objgen in skip:
             continue
-        if obj.get("/Filter") != Name.FlateDecode or obj.get("/DecodeParms") is not None:
+        if obj.get("/Type") in (Name.XRef, Name.ObjStm) or obj.get("/DecodeParms") is not None:
             continue
-        if obj.get("/Type") in (Name.XRef, Name.ObjStm):
-            continue
+        flt = obj.get("/Filter")
+        if isinstance(flt, Array):
+            flt = flt[0] if len(flt) == 1 else "multi"
         try:
-            raw = obj.read_raw_bytes()
-            new = zlib.compress(zlib.decompress(raw), 9)
+            if flt is None:
+                raw = None
+                data = obj.read_raw_bytes()
+            elif flt == Name.FlateDecode:
+                raw = obj.read_raw_bytes()
+                data = zlib.decompress(raw)
+            else:
+                continue
+            if len(data) < 32:
+                continue
+            new = deflate.zlib_best(data)
         except Exception:
             continue
-        if len(new) < len(raw):
+        if len(new) < (len(raw) if raw is not None else len(data)):
             obj.write(new, filter=Name.FlateDecode)
 
 

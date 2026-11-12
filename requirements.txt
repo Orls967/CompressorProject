@@ -7,6 +7,7 @@ Pillow>=11.0
 pypdfium2>=4.30
 lxml>=5.0
 numpy>=2.0
+zopfli>=0.2
 # Validasi dokumen Office + pembuatan file uji
 python-docx>=1.1
 python-pptx>=1.0
