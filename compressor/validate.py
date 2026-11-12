@@ -17,7 +17,7 @@ from PIL import Image
 # pdfium tidak thread-safe → semua pemanggilan diserialkan.
 _PDFIUM_LOCK = threading.RLock()
 
-TEXT_MIN_RATIO = 0.95      # minimal porsi karakter yang masih bisa diekstrak
+TEXT_MIN_RATIO = 0.995     # minimal porsi karakter yang masih bisa diekstrak (ligatur hilang = ditolak)
 SSIM_MIN = 0.72            # di bawah ini tampilan halaman dianggap rusak
 MAX_TEXT_PAGES = 400
 VISUAL_PAGES = 5
@@ -318,18 +318,25 @@ def validate_office(orig: Path, new: Path) -> Validation:
 
 # ---------------------------------------------------------------------- gambar
 
+def _gray_thumb(im: Image.Image, size: int = 256) -> np.ndarray:
+    """Thumbnail abu-abu di atas latar putih (piksel transparan tidak ikut dibandingkan)."""
+    rgba = im.convert("RGBA")
+    flat = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+    flat.alpha_composite(rgba)
+    return np.asarray(flat.convert("L").resize((size, size), Image.Resampling.BILINEAR), dtype=np.float32)
+
+
 def validate_image(orig: Path, new: Path) -> Validation:
+    from PIL import ImageOps
     v = Validation(units="gambar")
     try:
         with Image.open(new) as im:
             im.load()
             size_new, fmt_new = im.size, im.format
-            thumb_new = np.asarray(im.convert("L").resize((256, 256)), dtype=np.float32)
+            thumb_new = _gray_thumb(im)
         with Image.open(orig) as im:
-            from PIL import ImageOps
-            im2 = ImageOps.exif_transpose(im)
             fmt_old = im.format
-            thumb_old = np.asarray(im2.convert("L").resize((256, 256)), dtype=np.float32)
+            thumb_old = _gray_thumb(ImageOps.exif_transpose(im))
     except Exception as e:
         return v.fail(f"output tidak bisa dibuka ({type(e).__name__}: {e})")
     if fmt_new != fmt_old:
