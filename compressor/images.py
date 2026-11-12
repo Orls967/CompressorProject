@@ -24,7 +24,8 @@ from .presets import Settings
 Image.MAX_IMAGE_PIXELS = 600_000_000  # scan besar tidak dianggap "bom dekompresi"
 
 PHOTO = "photo"
-GRAPHIC = "graphic"
+GRAPHIC = "graphic"   # screenshot, diagram, gambar berisi teks → tetap PNG
+SCAN = "scan"         # halaman teks hasil scan/foto dokumen → JPEG, tapi DPI lebih tinggi
 
 
 # --------------------------------------------------------------------------- util
@@ -63,7 +64,7 @@ def image_metrics(img: Image.Image) -> dict:
     tile = 192
     nx = min(4, max(1, w // tile))
     ny = min(4, max(1, h // tile))
-    total = flat = nonflat = sharp = 0
+    total = flat = nonflat = sharp = bright = 0
     for j in range(ny):
         for i in range(nx):
             x = max(0, min(w - tile, int((i + 0.5) * w / nx - tile / 2))) if w > tile else 0
@@ -78,9 +79,11 @@ def image_metrics(img: Image.Image) -> dict:
             flat += int((m == 0).sum())
             nonflat += int((m > 0).sum())
             sharp += int((m >= 48).sum())
+            bright += int((a[:-1, :-1, :].mean(axis=2) > 160).sum())
     if not total:
-        return {"flat": 1.0, "sharp_nf": 1.0, "sharp_all": 0.0}
-    return {"flat": flat / total, "sharp_nf": sharp / max(1, nonflat), "sharp_all": sharp / total}
+        return {"flat": 1.0, "sharp_nf": 1.0, "sharp_all": 0.0, "bright": 1.0}
+    return {"flat": flat / total, "sharp_nf": sharp / max(1, nonflat),
+            "sharp_all": sharp / total, "bright": bright / total}
 
 
 def classify(img: Image.Image) -> str:
@@ -100,7 +103,31 @@ def classify(img: Image.Image) -> str:
         return GRAPHIC
     if m["flat"] >= 0.2 and m["sharp_all"] >= 0.02:
         return GRAPHIC
+    if m["sharp_all"] >= 0.03 and m["bright"] >= 0.6:
+        return SCAN  # latar terang ber-noise + banyak goresan tajam = teks hasil scan
     return PHOTO
+
+
+def jpeg_quality_for(kind: str, settings: Settings) -> int:
+    """Gambar berisi teks diberi kualitas JPEG lebih tinggi supaya tidak muncul
+    ringing di sekitar huruf."""
+    q = settings.jpeg_quality
+    if kind == GRAPHIC:
+        return min(90, q + 15)
+    if kind == SCAN:
+        return max(q, 60)
+    return q
+
+
+def target_dpi(kind: str, settings: Settings) -> int:
+    """DPI target per jenis gambar (0 = jangan di-resize)."""
+    if settings.dpi <= 0:
+        return 0
+    if kind == GRAPHIC:
+        return settings.graphic_dpi
+    if kind == SCAN:  # teks hasil scan: jangan di bawah 150 DPI supaya tetap terbaca
+        return max(settings.dpi, min(settings.graphic_dpi, 150))
+    return settings.dpi
 
 
 _STD_LUMA_SUM = 3929  # jumlah tabel kuantisasi luminance standar JPEG (kualitas 50)
@@ -179,14 +206,19 @@ def encode_jpeg(img: Image.Image, quality: int, exif: bytes | None = None) -> by
     return buf.getvalue()
 
 
-def optimize_jpeg_lossless(data: bytes, keep_all_markers: bool = False) -> bytes:
-    """Optimasi Huffman + progressive tanpa mengubah satu piksel pun."""
+def optimize_jpeg_lossless(data: bytes, keep_all_markers: bool = False,
+                           strip_all: bool = False) -> bytes:
+    """Optimasi Huffman + progressive tanpa mengubah satu piksel pun.
+
+    Default menyimpan profil ICC saja; ``strip_all`` membuang semua marker
+    (dipakai di PDF, yang mengabaikan ICC/EXIF di dalam JPEG).
+    """
     jpegtran = deps.path("jpegtran")
     if not jpegtran:
         return data
-    copy = "all" if keep_all_markers else "icc"
+    copy = "all" if keep_all_markers else ("none" if strip_all else "icc")
     code, out = _run([jpegtran, "-copy", copy, "-optimize", "-progressive"], data)
-    if code != 0:  # jpegtran lama tidak kenal "-copy icc"
+    if code != 0 and copy == "icc":  # jpegtran lama tidak kenal "-copy icc"
         code, out = _run([jpegtran, "-copy", "all", "-optimize", "-progressive"], data)
     if code == 0 and out[:2] == b"\xff\xd8" and len(out) < len(data):
         return out
@@ -378,7 +410,7 @@ def recompress(
     w, h = img.size
     scale = 1.0
     if display_in and display_in[0] > 0 and display_in[1] > 0:
-        dpi = settings.dpi if kind == PHOTO else settings.graphic_dpi
+        dpi = target_dpi(kind, settings)
         if dpi > 0:
             dw, dh = display_in
             if orientation in (5, 6, 7, 8):  # piksel tersimpan dalam posisi diputar 90°
@@ -406,9 +438,7 @@ def recompress(
 
     if fmt == "JPEG":
         ext = "jpeg"
-        # Gambar berisi teks yang tersimpan sebagai JPEG: pakai kualitas lebih
-        # tinggi supaya tidak muncul ringing di sekitar huruf.
-        q = settings.jpeg_quality if kind == PHOTO else min(90, settings.jpeg_quality + 15)
+        q = jpeg_quality_for(kind, settings)
         if not resized and not to_gray and quality_in is not None and quality_in <= q + 3:
             return _lossless(data, fmt, orientation, kind)  # sudah sekecil target
         exif = None
@@ -423,20 +453,20 @@ def recompress(
         if out:
             out = optimize_png_lossless(out)
             notes.append("PNG transparan → pngquant")
-    elif kind == PHOTO and allow_jpeg_convert:
-        out = encode_jpeg(img, settings.jpeg_quality)
+    elif kind != GRAPHIC and allow_jpeg_convert:
+        q = jpeg_quality_for(kind, settings)
+        out = encode_jpeg(img, q)
         ext = "jpeg"
-        notes.append(f"foto {fmt} → JPEG q{settings.jpeg_quality}")
+        notes.append(f"{'foto' if kind == PHOTO else 'scan'} {fmt} → JPEG q{q}")
     else:
         label = "grafis/teks" if kind == GRAPHIC else "foto"
         out = quantize_png(img, settings.png_colors, settings.png_quality, flat_art=kind == GRAPHIC)
         if out:
             out = optimize_png_lossless(out)
             notes.append(f"{label} tetap PNG → pngquant")
-        if resized or fmt != "PNG":
-            plain = optimize_png_lossless(png_bytes(img, 6))
-            if out is None or len(plain) < len(out):
-                out, notes = plain, notes[:1] + ["PNG lossless"]
+        if out is None and (resized or fmt != "PNG"):
+            out = optimize_png_lossless(png_bytes(img, 6))
+            notes.append("PNG lossless")
         if resized and fmt == "PNG" and not to_gray:
             # Mengecilkan gambar grafis menambah piksel antialias (lebih banyak
             # warna), jadi kadang versi resolusi asli justru lebih kecil DAN
@@ -452,9 +482,11 @@ def recompress(
     best: Encoded | None = None
     if out and len(out) < len(data) * 0.98:
         best = Encoded(out, ext, img.size[0], img.size[1], kind, ", ".join(notes))
-    fallback = _lossless(data, fmt, orientation, kind)
-    if fallback and (best is None or len(fallback.data) < len(best.data)):
-        best = fallback
+    if best is None or len(best.data) > len(data) * 0.7:
+        # Hasil lossy tidak jauh lebih kecil → bandingkan dengan optimasi lossless.
+        fallback = _lossless(data, fmt, orientation, kind)
+        if fallback and (best is None or len(fallback.data) < len(best.data)):
+            best = fallback
     return best
 
 

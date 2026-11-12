@@ -323,6 +323,8 @@ def build_assets() -> dict:
 # ------------------------------------------------------------------------- PDF
 
 def build_pdfs(a: dict) -> None:
+    from reportlab import rl_config
+    rl_config.useA85 = 0  # tanpa ASCII85, seperti PDF dari aplikasi sungguhan
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet
     from reportlab.lib.units import cm
