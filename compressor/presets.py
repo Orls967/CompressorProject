@@ -44,7 +44,7 @@ PRESETS: dict[str, Settings] = {
                          max_photo_px=2560, max_graphic_px=0),
     "maximum": Settings(name="maximum", dpi=100, graphic_dpi=150, jpeg_quality=50,
                         png_colors=128, png_quality=(45, 80),
-                        max_photo_px=1600, max_graphic_px=2560),
+                        max_photo_px=1600, max_graphic_px=0),
 }
 
 PRESET_LABELS = {
