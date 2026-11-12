@@ -105,6 +105,8 @@ DPI dihitung dari ukuran tampil tiap gambar di dalam dokumen, bukan dari ukuran 
 - PDF bertanda tangan digital: tanda tangannya tidak lagi valid setelah dikompres (ada peringatan).
 - Metadata XMP PDF dibuang, jadi klaim PDF/A tidak dipertahankan.
 - PDF yang butuh password untuk dibuka tidak bisa diproses.
+- Format lama dikonversi oleh LibreOffice. Untuk XLS, tinggi baris dan lebar kolom bisa bergeser sedikit (isi sel tidak berubah), jadi angka panjang bisa tampil dengan format berbeda.
+- Poles zopfli pada PDF dibatasi 20 detik per file; PDF yang sangat panjang sisanya memakai deflate biasa.
 - Gambar EMF/WMF/SVG, video, audio, dan font tertanam di dokumen Office tidak diubah.
 - Di mode Convert, dokumen yang isinya hanya teks bisa menghasilkan PDF yang lebih besar dari file aslinya. PDF tetap disimpan dan diberi tanda.
 - Linearize ("fast web view") mati secara default karena menambah ukuran; nyalakan dengan `--linearize`.

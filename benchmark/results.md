@@ -140,3 +140,7 @@ Dokumen asli dan hasil dirender ke PDF lewat LibreOffice, lalu halamannya diband
 
 - Tidak ada file yang gagal diproses; semua output lolos validasi.
 - Di mode Convert, PDF lebih besar dari file asli untuk: docx_teks.docx, pptx_campuran.pptx, xlsx_data.xlsx (dokumen tanpa gambar besar; teks + font di PDF memang lebih besar daripada XML ter-zip).
+## Perubahan setelah benchmark ini
+
+- Poles zopfli PDF sekarang dibatasi 20 detik per file. Dampaknya hanya pada `xlsx_data.xlsx` dan `xls_data.xls` di mode Convert (Lossless/Maximum): waktu turun dari ±170–180 detik ke ±38 detik, ukuran PDF naik dari ±3,1–3,2 MB ke ±3,5 MB (diukur ulang untuk `xlsx_data.xlsx` Maximum). Baris lain di tabel tidak terpengaruh.
+- `xls_data.xls`, kemiripan visual 0,551: sudah diselidiki. Penyebabnya konversi XLS → XLSX oleh LibreOffice yang menggeser sedikit tinggi baris dan lebar kolom, sehingga angka panjang tampil dengan format berbeda (`2E+07` vs `19883000`). 99,86% karakter hasil render cocok; isi sel tidak berubah.

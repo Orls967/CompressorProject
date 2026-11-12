@@ -255,6 +255,9 @@ def _modernize(res, src: Path, tmpd: Path, report) -> Path:
     report(0.05, f"LibreOffice: {ext[1:].upper()} → {fmt.upper()}")
     modern = convert.convert(src, tmpd / "modern", fmt)
     res.notes.append(f"Format lama {ext[1:].upper()} diubah ke {fmt.upper()}")
+    if ext == ".xls":
+        res.notes.append("Konversi XLS → XLSX bisa menggeser sedikit tinggi baris/lebar kolom "
+                         "(isi sel tidak berubah); periksa tampilannya kalau tata letak penting")
     return modern
 
 

@@ -19,6 +19,7 @@ import math
 import shutil
 import subprocess
 import tempfile
+import time
 import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -35,6 +36,7 @@ pikepdf.settings.set_flate_compression_level(9)
 
 Progress = Callable[[float, str], None]
 _IDENTITY = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+ZOPFLI_BUDGET_S = 20.0   # batas waktu poles zopfli per PDF
 _PASSTHROUGH_FILTERS = {"/JPXDecode", "/JBIG2Decode", "/CCITTFaxDecode"}
 
 
@@ -553,9 +555,12 @@ def _recompress_flate(pdf: pikepdf.Pdf, skip: set, best: bool = False) -> None:
     """Deflate ulang stream tanpa predictor: content stream, font, ToUnicode,
     dll. ``best`` = pakai zopfli (lebih kecil, lebih lama); kalau tidak, zlib 9.
     Stream yang belum dikompres ikut dikompres di sini."""
+    deadline = time.monotonic() + ZOPFLI_BUDGET_S
     for obj in pdf.objects:
         if not isinstance(obj, Stream) or obj.objgen in skip:
             continue
+        if best and time.monotonic() > deadline:
+            best = False  # anggaran waktu habis (PDF sangat panjang) → sisanya zlib 9
         if obj.get("/Type") in (Name.XRef, Name.ObjStm) or obj.get("/DecodeParms") is not None:
             continue
         flt = obj.get("/Filter")

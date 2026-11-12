@@ -190,7 +190,10 @@ def write_report(rows, baselines, files, elapsed, args) -> None:
     if any(r.get("visual") is not None for r in rows):
         md += ["## Kemiripan visual dokumen Office", "",
                "Dokumen asli dan hasil dirender ke PDF lewat LibreOffice, lalu halamannya dibandingkan "
-               "(1,000 = identik; ambang gagal 0,72).", "", "| File | Balanced | Maximum |", "|---|---:|---:|"]
+               "(1,000 = identik; ambang gagal 0,72). Untuk format lama, angka ini juga memuat "
+               "pergeseran tata letak dari konversi LibreOffice: pada XLS tinggi baris/lebar kolom "
+               "bergeser sedikit sehingga nilainya rendah walau isi sel sama.", "",
+               "| File | Balanced | Maximum |", "|---|---:|---:|"]
         for f in files:
             b, m = by.get((f.name, "same", "balanced")), by.get((f.name, "same", "maximum"))
             if b and (b.get("visual") is not None or (m and m.get("visual") is not None)):
