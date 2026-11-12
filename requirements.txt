@@ -1,0 +1,14 @@
+# Aplikasi
+fastapi>=0.115
+uvicorn>=0.30
+python-multipart>=0.0.9
+pikepdf>=9.0
+Pillow>=11.0
+pypdfium2>=4.30
+lxml>=5.0
+numpy>=2.0
+# Validasi dokumen Office + pembuatan file uji
+python-docx>=1.1
+python-pptx>=1.0
+openpyxl>=3.1
+reportlab>=4.0

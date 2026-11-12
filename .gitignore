@@ -1,0 +1,18 @@
+# Hasil kompresi dan file uji pribadi — tidak ikut di-commit
+output/
+samples/real/
+
+# File uji hasil generate (buat ulang dengan ./run.sh samples)
+samples/generated/
+
+# Hasil benchmark mentah
+benchmark/work/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.cache/
+
+# macOS
+.DS_Store
