@@ -67,7 +67,7 @@ Aplikasi tidak pernah gagal diam-diam: tool yang kurang ditampilkan di UI dan di
 |---|---:|---:|---:|---|
 | Lossless | tetap | tetap | tetap | Piksel tidak berubah, hanya optimasi struktur |
 | Balanced (default) | 150 | 220 | q75 | Cocok untuk hampir semua keperluan |
-| Maximum | 100 | 150 | q50 | Sekecil mungkin; teks dan vektor tidak dirasterisasi |
+| Maximum | 100 | 150 | q50 | Sekecil mungkin; teks dan vektor tidak dirasterisasi; ada lintasan zopfli tambahan (lebih lama) |
 
 DPI dihitung dari ukuran tampil tiap gambar di dalam dokumen, bukan dari ukuran file gambarnya. DPI, kualitas JPEG, dan grayscale bisa diubah manual di "Pengaturan custom" atau lewat opsi CLI.
 
@@ -85,11 +85,11 @@ DPI dihitung dari ukuran tampil tiap gambar di dalam dokumen, bukan dari ukuran 
 
 **PDF.** Beberapa strategi dijalankan dan yang terkecil serta lolos validasi dipakai:
 
-1. `pikepdf`: tiap gambar dikompres ulang langsung di dalam PDF sesuai ukuran tampilnya; teks, vektor, font, tautan, dan form tidak disentuh. Ditambah object stream, deflate level 9, buang metadata, thumbnail, dan objek yang tidak terpakai.
+1. `pikepdf`: tiap gambar dikompres ulang langsung di dalam PDF sesuai ukuran tampilnya; teks, vektor, font, tautan, dan form tidak disentuh. Ditambah object stream, deflate ulang semua stream, buang metadata, thumbnail, dan objek yang tidak terpakai. Di preset Lossless dan Maximum, stream teks dan font dipoles lagi dengan zopfli.
 2. `pikepdf+gs`: hasil langkah 1 dilewatkan ke Ghostscript untuk subset font dan membuang duplikat.
 3. `gs-downsample`: cadangan kalau dua strategi di atas belum banyak mengecilkan file.
 
-**DOCX/PPTX/XLSX.** File dibuka sebagai ZIP. Gambar di folder media di-resize sesuai ukuran tampilnya di XML (termasuk crop dan grup), media yang tidak terpakai, duplikat, dan thumbnail dibuang, lalu arsip di-zip ulang dengan deflate level 9.
+**DOCX/PPTX/XLSX.** File dibuka sebagai ZIP. Gambar di folder media di-resize sesuai ukuran tampilnya di XML (termasuk crop dan grup), media yang tidak terpakai, duplikat, dan thumbnail dibuang, lalu arsip di-zip ulang dengan deflate zopfli (kompatibel penuh dengan ZIP biasa, tapi lebih kecil daripada deflate level 9; untuk spreadsheet besar butuh sekitar 1 detik per MB XML).
 
 **Foto vs gambar berisi teks.** Tiap gambar diklasifikasi dari porsi area rata dan ketajaman tepinya:
 
@@ -122,6 +122,7 @@ compressor/
   office.py             DOCX / PPTX / XLSX
   convert.py            LibreOffice headless
   validate.py           validasi output
+  deflate.py            deflate zopfli + penulis ZIP
   pipeline.py           orkestrasi per file, penamaan, fallback
   cli.py                batch lewat terminal
   server.py, static/    UI web lokal

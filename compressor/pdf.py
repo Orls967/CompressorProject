@@ -210,9 +210,9 @@ def _write_png_stream(obj, png: dict, colorspace=None) -> None:
         obj.ColorSpace = colorspace
 
 
-def _png_stream(img: Image.Image, quantized: bytes | None = None) -> dict | None:
+def _png_stream(img: Image.Image, quantized: bytes | None = None, zopfli: bool = False) -> dict | None:
     data = quantized if quantized is not None else images.png_bytes(img, 1)
-    data = images.optimize_png_lossless(data, keep_structure=True)
+    data = images.optimize_png_lossless(data, keep_structure=True, zopfli=zopfli)
     png = images.parse_png(data)
     if not png or png.get("interlace") or png["color"] not in (0, 2, 3, 4, 6):
         return None
@@ -460,10 +460,14 @@ class _ImagePass:
             else:
                 png = _png_stream(im)
             if png:
-                cands.append((len(png["idat"]), png, m))
+                cands.append((len(png["idat"]), png, m, im, qd if im.mode == "RGB" else None))
         if not cands:
             return None
-        _, png, m = min(cands, key=lambda c: c[0])
+        _, png, m, im, qd = min(cands, key=lambda c: c[0])
+        if self.s.png_zopfli:  # lintasan zopfli hanya untuk kandidat pemenang
+            better = _png_stream(im, qd, zopfli=True)
+            if better and len(better["idat"]) < len(png["idat"]):
+                png = better
         return ("png", png, m)
 
 
@@ -545,10 +549,10 @@ def _strip_metadata(pdf: pikepdf.Pdf) -> None:
                     del obj[key]
 
 
-def _recompress_flate(pdf: pikepdf.Pdf, skip: set) -> None:
-    """Deflate ulang (zopfli) untuk stream tanpa predictor: content stream,
-    font, ToUnicode, dll. Stream yang belum dikompres ikut dikompres di sini
-    supaya tidak jatuh ke zlib bawaan qpdf saat disimpan."""
+def _recompress_flate(pdf: pikepdf.Pdf, skip: set, best: bool = False) -> None:
+    """Deflate ulang stream tanpa predictor: content stream, font, ToUnicode,
+    dll. ``best`` = pakai zopfli (lebih kecil, lebih lama); kalau tidak, zlib 9.
+    Stream yang belum dikompres ikut dikompres di sini."""
     for obj in pdf.objects:
         if not isinstance(obj, Stream) or obj.objgen in skip:
             continue
@@ -568,11 +572,23 @@ def _recompress_flate(pdf: pikepdf.Pdf, skip: set) -> None:
                 continue
             if len(data) < 32:
                 continue
-            new = deflate.zlib_best(data)
+            if obj.get("/Subtype") == Name.Image and len(data) > 4_000_000:
+                continue  # gambar mentah besar: bukan urusan langkah ini
+            new = deflate.zlib_best(data) if best else zlib.compress(data, 9)
         except Exception:
             continue
         if len(new) < (len(raw) if raw is not None else len(data)):
             obj.write(new, filter=Name.FlateDecode)
+
+
+def polish(src: Path, dst: Path, settings: Settings) -> None:
+    """Poles akhir (lossless): kompres ulang stream teks/font dengan zopfli."""
+    with pikepdf.open(src) as pdf:
+        encrypted = pdf.is_encrypted
+        _recompress_flate(pdf, set(), best=True)
+        pdf.save(dst, object_stream_mode=pikepdf.ObjectStreamMode.generate,
+                 compress_streams=True, recompress_flate=False,
+                 linearize=settings.linearize, encryption=True if encrypted else None)
 
 
 def pikepdf_pass(src: Path, dst: Path, settings: Settings, lossy: bool, cache: dict,
@@ -758,6 +774,17 @@ def compress_pdf(src: Path, dst: Path, settings: Settings, progress: Progress | 
         }
         if valid:
             best = min(valid, key=lambda c: c.size)
+            if settings.pdf_zopfli and deflate.HAS_ZOPFLI:
+                try:
+                    report(0.96, "poles akhir (zopfli)")
+                    polished = tmpd / "polished.pdf"
+                    polish(best.path, polished, settings)
+                    if polished.stat().st_size < best.size:
+                        v = validate.validate_pdf(src, polished, reference=reference)
+                        if v.ok:
+                            best = Candidate(best.label, polished, polished.stat().st_size, v, best.stats)
+                except Exception as e:
+                    notes.append(f"poles zopfli dilewati ({type(e).__name__})")
             result["strategy"] = best.label
             result["validation"] = best.validation
             result["detail"] = best.stats.describe() if best.stats else ""

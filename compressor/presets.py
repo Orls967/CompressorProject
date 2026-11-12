@@ -23,6 +23,10 @@ class Settings:
     # Batas sisi terpanjang (piksel) untuk file gambar mandiri; 0 = tidak di-resize.
     max_photo_px: int = 2560
     max_graphic_px: int = 0
+    # Lintasan zopfli tambahan untuk PNG final (±1–6% lebih kecil, lebih lama).
+    png_zopfli: bool = False
+    # Poles akhir stream PDF dengan zopfli (±3% lebih kecil, beberapa detik lebih lama).
+    pdf_zopfli: bool = False
     # Linearize ("fast web view") menambah beberapa KB, jadi default mati.
     linearize: bool = False
 
@@ -38,13 +42,14 @@ class Settings:
 
 PRESETS: dict[str, Settings] = {
     "lossless": Settings(name="lossless", lossless=True, dpi=0, graphic_dpi=0,
-                         jpeg_quality=100, max_photo_px=0, max_graphic_px=0),
+                         jpeg_quality=100, max_photo_px=0, max_graphic_px=0, pdf_zopfli=True),
     "balanced": Settings(name="balanced", dpi=150, graphic_dpi=220, jpeg_quality=75,
                          png_colors=256, png_quality=(65, 90),
                          max_photo_px=2560, max_graphic_px=0),
     "maximum": Settings(name="maximum", dpi=100, graphic_dpi=150, jpeg_quality=50,
                         png_colors=128, png_quality=(45, 80),
-                        max_photo_px=1600, max_graphic_px=0),
+                        max_photo_px=1600, max_graphic_px=0, png_zopfli=True,
+                        pdf_zopfli=True),
 }
 
 PRESET_LABELS = {

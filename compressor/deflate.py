@@ -49,6 +49,8 @@ def raw_best(data: bytes) -> bytes:
 # ----------------------------------------------------------------- penulis ZIP
 
 _DOS_TIME, _DOS_DATE = 0, 0x0021  # 1980-01-01 00:00 → arsip deterministik
+_PRECOMPRESSED = {b"\x89PNG", b"GIF8", b"PK\x03\x04", b"\x00\x00\x00\x18", b"\x00\x00\x00\x1c",
+                  b"\x00\x00\x00\x20", b"RIFF", b"OggS", b"ID3\x03", b"ID3\x04"}
 
 
 def write_zip(dst: Path, entries: list[tuple[str, bytes]]) -> None:
@@ -67,7 +69,11 @@ def write_zip(dst: Path, entries: list[tuple[str, bytes]]) -> None:
             crc = zlib.crc32(data) & 0xFFFFFFFF
             method, payload = 0, data
             if data:
-                packed = raw_best(data)
+                if data[:4] in _PRECOMPRESSED or data[:2] == b"\xff\xd8":
+                    # JPEG/PNG/GIF/ZIP sudah terkompresi: cukup uji cepat zlib.
+                    packed = zlib.compress(data, 9)[2:-4]
+                else:
+                    packed = raw_best(data)
                 if len(packed) < len(data):
                     method, payload = 8, packed
             offset = fh.tell()

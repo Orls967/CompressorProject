@@ -231,13 +231,16 @@ def png_bytes(img: Image.Image, level: int = 1) -> bytes:
     return buf.getvalue()
 
 
-def optimize_png_lossless(data: bytes, keep_structure: bool = False) -> bytes:
+def optimize_png_lossless(data: bytes, keep_structure: bool = False, zopfli: bool = False) -> bytes:
     """oxipng; ``keep_structure`` melarang perubahan tipe warna/bit depth
-    (dibutuhkan saat aliran IDAT ditanam ke PDF)."""
+    (dibutuhkan saat aliran IDAT ditanam ke PDF). ``zopfli`` = lintasan
+    tambahan yang lebih lambat, hanya untuk PNG yang sudah kecil."""
     oxipng = deps.path("oxipng")
     if oxipng:
         level = "4" if len(data) < 1_500_000 else "2"
         cmd = [oxipng, "-o", level, "--strip", "all", "-q", "--stdout"]
+        if zopfli and len(data) < 600_000:
+            cmd += ["-z", "--zi", "5"]
         if keep_structure:
             cmd.append("--nx")
         cmd.append("-")
@@ -487,6 +490,8 @@ def recompress(
         fallback = _lossless(data, fmt, orientation, kind)
         if fallback and (best is None or len(fallback.data) < len(best.data)):
             best = fallback
+    if best is not None and best.ext == "png" and settings.png_zopfli:
+        best.data = optimize_png_lossless(best.data, zopfli=True)
     return best
 
 
