@@ -154,10 +154,25 @@ def process_file(
         res.status, res.message = "error", str(e)
     except Exception as e:
         res.status = "error"
-        res.message = str(e) or type(e).__name__
+        res.message = _friendly(e)
     res.seconds = round(time.time() - started, 2)
     report(1.0, "selesai")
     return res
+
+
+def _friendly(e: Exception) -> str:
+    """Pesan error yang bisa dipahami, tanpa path sementara."""
+    import zipfile
+    import pikepdf
+    if isinstance(e, pikepdf.PasswordError):
+        return "PDF dilindungi password — buka kuncinya dulu sebelum dikompres"
+    if isinstance(e, pikepdf.PdfError):
+        return "File PDF rusak atau bukan PDF yang valid"
+    if isinstance(e, zipfile.BadZipFile):
+        return "File rusak atau bukan dokumen Office (DOCX/PPTX/XLSX) yang valid"
+    if isinstance(e, MemoryError):
+        return "Memori tidak cukup untuk memproses file ini"
+    return str(e) or type(e).__name__
 
 
 # ------------------------------------------------------------------- per jalur
@@ -174,6 +189,12 @@ def _finish(res: Result, tmp_out: Path, src: Path, out_dir: Path, ext: str,
 
 def _image(res, src, tmpd, out_dir, settings, report) -> None:
     report(0.1, "mengompres gambar")
+    try:
+        from PIL import Image
+        with Image.open(src) as im:
+            im.verify()
+    except Exception:
+        raise RuntimeError("File gambar rusak atau bukan JPG/PNG yang valid")
     tmp_out = tmpd / f"out{src.suffix.lower()}"
     info = images.compress_image_file(src, tmp_out, settings)
     res.detail = info.get("note", "")

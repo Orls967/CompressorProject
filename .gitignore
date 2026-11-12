@@ -16,3 +16,6 @@ __pycache__/
 
 # macOS
 .DS_Store
+
+# Konfigurasi lokal Claude Code
+.claude/

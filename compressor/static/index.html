@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compressor</title>
+<style>
+  :root {
+    --bg: #f5f5f2; --card: #ffffff; --ink: #1c1d1f; --muted: #6b6e76; --line: #e4e4df;
+    --accent: #1f6feb; --accent-ink: #ffffff; --accent-soft: #e8f0fe;
+    --ok: #177a45; --ok-soft: #e3f4ea; --warn: #9a6200; --warn-soft: #fdf2d8;
+    --err: #b3261e; --err-soft: #fbe9e7; --radius: 12px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16171a; --card: #1f2024; --ink: #ececec; --muted: #9a9da6; --line: #2f3137;
+      --accent: #5b9bff; --accent-ink: #0b1220; --accent-soft: #1d2b45;
+      --ok: #58c98a; --ok-soft: #173326; --warn: #e5b454; --warn-soft: #3a2e12;
+      --err: #ff8a80; --err-soft: #3b1b19;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: 1040px; margin: 0 auto; padding: 28px 20px 64px; }
+  header { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; flex-wrap: wrap; }
+  .mark {
+    width: 40px; height: 40px; border-radius: 10px; background: var(--accent); color: var(--accent-ink);
+    display: grid; place-items: center; font-weight: 700; font-size: 20px; flex: none;
+  }
+  h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+  .tagline { color: var(--muted); font-size: 13.5px; }
+  .chip {
+    margin-left: auto; font-size: 12.5px; padding: 5px 11px; border-radius: 999px;
+    background: var(--ok-soft); color: var(--ok); font-weight: 600; white-space: nowrap;
+  }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; margin-bottom: 16px; }
+  .label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 8px; }
+  .row { display: grid; grid-template-columns: 1fr 2fr; gap: 22px; }
+  @media (max-width: 760px) { .row { grid-template-columns: 1fr; } }
+
+  .seg { display: grid; gap: 8px; }
+  .opt {
+    display: block; border: 1.5px solid var(--line); border-radius: 10px; padding: 10px 12px; cursor: pointer;
+    transition: border-color .12s, background .12s;
+  }
+  .opt:hover { border-color: var(--accent); }
+  .opt input { position: absolute; opacity: 0; pointer-events: none; }
+  .opt:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+  .opt:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .opt b { display: block; font-size: 14.5px; }
+  .opt span { color: var(--muted); font-size: 12.5px; }
+  .presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  @media (max-width: 560px) { .presets { grid-template-columns: 1fr; } }
+
+  details.custom { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
+  details.custom summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+  .fields { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 12px; align-items: flex-end; }
+  .field label { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 4px; }
+  .field input[type=number] {
+    width: 110px; padding: 7px 9px; border: 1.5px solid var(--line); border-radius: 8px;
+    background: var(--card); color: var(--ink); font: inherit;
+  }
+  .field input[type=range] { width: 190px; accent-color: var(--accent); vertical-align: middle; }
+  .check { display: flex; align-items: center; gap: 8px; font-size: 14px; padding-bottom: 7px; }
+  .check input { width: 16px; height: 16px; accent-color: var(--accent); }
+  .hint { color: var(--muted); font-size: 12.5px; margin-top: 10px; }
+
+  #drop {
+    border: 2px dashed var(--line); border-radius: var(--radius); background: var(--card);
+    padding: 34px 20px; text-align: center; cursor: pointer; margin-bottom: 16px;
+    transition: border-color .12s, background .12s;
+  }
+  #drop.over, #drop:hover { border-color: var(--accent); background: var(--accent-soft); }
+  #drop:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #drop b { font-size: 16.5px; display: block; margin-bottom: 4px; }
+  #drop span { color: var(--muted); font-size: 13.5px; }
+
+  .banner { border-radius: 10px; padding: 12px 14px; margin-bottom: 16px; font-size: 13.5px; background: var(--warn-soft); color: var(--warn); }
+  .banner code, td code { font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; background: rgba(127,127,127,.16); padding: 1px 6px; border-radius: 5px; user-select: all; }
+  .banner ul { margin: 6px 0 0; padding-left: 18px; }
+
+  .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  .toolbar .total { font-size: 14px; }
+  .toolbar .total b { font-variant-numeric: tabular-nums; }
+  .spacer { flex: 1; }
+  button, a.btn {
+    font: inherit; font-size: 13.5px; font-weight: 600; padding: 7px 13px; border-radius: 8px;
+    border: 1.5px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; text-decoration: none;
+    display: inline-block; white-space: nowrap;
+  }
+  button:hover, a.btn:hover { border-color: var(--accent); }
+  button.primary, a.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  button:focus-visible, a.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .tablewrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  td { padding: 11px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.name { min-width: 180px; max-width: 260px; overflow-wrap: anywhere; font-weight: 600; }
+  td.name small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
+  .pct { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .pct.ok { color: var(--ok); } .pct.zero { color: var(--muted); } .pct.neg { color: var(--warn); }
+  .bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; min-width: 110px; margin-top: 6px; }
+  .bar i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .25s; }
+  .status { font-size: 13px; }
+  .status .tag { display: inline-block; padding: 2px 9px; border-radius: 999px; font-weight: 600; font-size: 12.5px; }
+  .tag.ok { background: var(--ok-soft); color: var(--ok); }
+  .tag.keep, .tag.larger { background: var(--warn-soft); color: var(--warn); }
+  .tag.err { background: var(--err-soft); color: var(--err); }
+  .tag.run { background: var(--accent-soft); color: var(--accent); }
+  .status p { margin: 5px 0 0; color: var(--muted); font-size: 12.5px; }
+  .status details { margin-top: 4px; color: var(--muted); font-size: 12.5px; }
+  .status details summary { cursor: pointer; }
+  .status details ul { margin: 4px 0 0; padding-left: 16px; }
+  .actions { display: flex; gap: 6px; flex-wrap: nowrap; justify-content: flex-end; }
+  .status { min-width: 200px; max-width: 360px; overflow-wrap: anywhere; }
+  .empty { color: var(--muted); text-align: center; padding: 26px 0 14px; font-size: 14px; }
+  #toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink); color: var(--bg);
+    padding: 10px 16px; border-radius: 10px; font-size: 13.5px; opacity: 0; pointer-events: none; transition: opacity .2s; max-width: 90vw;
+  }
+  #toast.show { opacity: 1; }
+  footer { color: var(--muted); font-size: 12.5px; text-align: center; margin-top: 18px; overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="mark" aria-hidden="true">C</div>
+    <div>
+      <h1>Compressor</h1>
+      <div class="tagline">Perkecil PDF, Word, PowerPoint, Excel, dan gambar — file tetap bisa dibuka dan terbaca jelas.</div>
+    </div>
+    <div class="chip" title="Server hanya berjalan di 127.0.0.1; tidak ada yang dikirim ke internet">100% lokal · tanpa upload</div>
+  </header>
+
+  <div id="deps" class="banner" hidden></div>
+
+  <section class="card">
+    <div class="row">
+      <div>
+        <div class="label">Mode output</div>
+        <div class="seg" id="modes">
+          <label class="opt"><input type="radio" name="mode" value="same" checked>
+            <b>Format sama</b><span>PDF→PDF, DOCX→DOCX, PPTX→PPTX, XLSX→XLSX, JPG/PNG tetap</span></label>
+          <label class="opt"><input type="radio" name="mode" value="pdf">
+            <b>Convert ke PDF</b><span>Word/PowerPoint/Excel → PDF, lalu PDF-nya dikompres</span></label>
+        </div>
+      </div>
+      <div>
+        <div class="label">Preset</div>
+        <div class="presets" id="presets">
+          <label class="opt"><input type="radio" name="preset" value="lossless">
+            <b>Lossless</b><span>Kualitas tidak berubah sama sekali, hanya optimasi struktur</span></label>
+          <label class="opt"><input type="radio" name="preset" value="balanced" checked>
+            <b>Balanced</b><span>150 DPI, JPEG q75 — cocok untuk hampir semua keperluan</span></label>
+          <label class="opt"><input type="radio" name="preset" value="maximum">
+            <b>Maximum</b><span>100 DPI, JPEG q50 — sekecil mungkin, teks tetap tajam</span></label>
+        </div>
+        <details class="custom" id="custom">
+          <summary>Pengaturan custom</summary>
+          <div class="fields">
+            <div class="field">
+              <label for="dpi">DPI gambar</label>
+              <input type="number" id="dpi" min="36" max="600" step="1" placeholder="150">
+            </div>
+            <div class="field">
+              <label for="quality">Kualitas JPEG: <b id="qv">preset</b></label>
+              <input type="range" id="quality" min="10" max="95" step="1" value="75">
+            </div>
+            <label class="check"><input type="checkbox" id="gray"> Grayscale (hitam-putih)</label>
+            <button type="button" id="reset">Kembali ke preset</button>
+          </div>
+          <div class="hint">Kosongkan DPI dan jangan geser kualitas untuk memakai nilai preset. Gambar berisi teks (screenshot, diagram) otomatis diberi resolusi 1,5× dan tetap PNG.</div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <div id="drop" tabindex="0" role="button" aria-label="Pilih atau jatuhkan file untuk dikompres">
+    <b>Jatuhkan file di sini, atau klik untuk memilih</b>
+    <span>PDF · DOCX · PPTX · XLSX · DOC · PPT · XLS · JPG · PNG — bisa banyak sekaligus</span>
+    <input type="file" id="picker" multiple hidden
+           accept=".pdf,.docx,.pptx,.xlsx,.doc,.ppt,.xls,.jpg,.jpeg,.png">
+  </div>
+
+  <section class="card">
+    <div class="toolbar">
+      <div class="total" id="total">Belum ada file.</div>
+      <div class="spacer"></div>
+      <button type="button" id="clear">Bersihkan daftar</button>
+      <button type="button" class="primary" id="open">Buka folder output</button>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>File</th><th>Sebelum</th><th>Sesudah</th><th>Hemat</th><th>Status</th><th></th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="empty">Hasil kompresi akan muncul di sini. File asli tidak pernah ditimpa.</div>
+  </section>
+  <footer id="foot"></footer>
+</main>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const EXT = new Set([".pdf", ".docx", ".pptx", ".xlsx", ".doc", ".ppt", ".xls", ".jpg", ".jpeg", ".png"]);
+let qualityTouched = false, timer = null;
+
+function el(tag, attrs = {}, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") n.className = v; else if (k === "text") n.textContent = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v); else n.setAttribute(k, v);
+  }
+  for (const k of kids) if (k != null) n.append(k);
+  return n;
+}
+function human(n) {
+  const u = ["B", "KB", "MB", "GB"]; let i = 0; n = Number(n) || 0;
+  while (Math.abs(n) >= 1024 && i < 3) { n /= 1024; i++; }
+  return (i === 0 || n >= 100 ? n.toFixed(0) : n.toFixed(1)) + " " + u[i];
+}
+function toast(msg) {
+  const t = $("#toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), 4200);
+}
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  if (!r.ok) { let d = r.statusText; try { d = (await r.json()).detail || d; } catch (e) {} throw new Error(d); }
+  return r.json();
+}
+
+// ---- pengaturan
+$("#quality").addEventListener("input", (e) => { qualityTouched = true; $("#qv").textContent = e.target.value; });
+$("#reset").addEventListener("click", () => {
+  qualityTouched = false; $("#dpi").value = ""; $("#gray").checked = false; $("#qv").textContent = "preset"; syncPreset();
+});
+function syncPreset() {
+  const p = document.querySelector("input[name=preset]:checked").value;
+  const d = { lossless: ["asli", 95], balanced: ["150", 75], maximum: ["100", 50] }[p];
+  $("#dpi").placeholder = d[0];
+  if (!qualityTouched) $("#quality").value = d[1];
+}
+document.querySelectorAll("input[name=preset]").forEach((r) => r.addEventListener("change", syncPreset));
+
+// ---- unggah (ke server lokal di komputer ini saja)
+async function send(fileList) {
+  const files = [...fileList];
+  const good = files.filter((f) => EXT.has((f.name.match(/\.[^.]+$/) || [""])[0].toLowerCase()));
+  const bad = files.length - good.length;
+  if (bad) toast(`${bad} file dilewati karena formatnya tidak didukung.`);
+  if (!good.length) return;
+  const fd = new FormData();
+  good.forEach((f) => fd.append("files", f, f.name));
+  fd.append("mode", document.querySelector("input[name=mode]:checked").value);
+  fd.append("preset", document.querySelector("input[name=preset]:checked").value);
+  if ($("#dpi").value) fd.append("dpi", $("#dpi").value);
+  if (qualityTouched) fd.append("quality", $("#quality").value);
+  if ($("#gray").checked) fd.append("grayscale", "true");
+  $("#total").textContent = `Menyiapkan ${good.length} file…`;
+  try { await api("/api/compress", { method: "POST", body: fd }); poll(true); }
+  catch (e) { toast("Gagal memulai: " + e.message); }
+}
+const drop = $("#drop"), picker = $("#picker");
+drop.addEventListener("click", () => picker.click());
+drop.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); picker.click(); } });
+picker.addEventListener("change", () => { send(picker.files); picker.value = ""; });
+["dragenter", "dragover"].forEach((t) => document.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach((t) => document.addEventListener(t, (e) => { e.preventDefault(); if (t === "drop" || !e.relatedTarget) drop.classList.remove("over"); }));
+document.addEventListener("drop", (e) => { if (e.dataTransfer && e.dataTransfer.files.length) send(e.dataTransfer.files); });
+
+// ---- tabel hasil
+function statusCell(job) {
+  const r = job.result, box = el("div", { class: "status" });
+  if (job.status !== "done") {
+    box.append(el("span", { class: "tag run", text: job.status === "queued" ? "Menunggu" : "Memproses" }));
+    box.append(el("p", { text: job.stage }));
+    const bar = el("div", { class: "bar" }, el("i")); bar.firstChild.style.width = Math.round(job.progress * 100) + "%";
+    box.append(bar);
+    return box;
+  }
+  const map = { ok: ["ok", "Berhasil"], kept_original: ["keep", "File asli dipakai"], larger: ["larger", "PDF lebih besar"], error: ["err", "Gagal"] };
+  const [cls, label] = map[r.status] || ["err", r.status];
+  box.append(el("span", { class: "tag " + cls, text: label }));
+  const v = r.validation;
+  if (r.status === "ok") box.append(el("p", { text: "Validasi: " + (v ? v.summary : "—") }));
+  else box.append(el("p", { text: r.message }));
+  const notes = [r.detail, r.strategy ? "Strategi: " + r.strategy : "", ...(r.notes || [])].filter(Boolean);
+  if (r.preset) notes.unshift("Preset: " + r.preset);
+  if (notes.length) {
+    const ul = el("ul"); notes.forEach((n) => ul.append(el("li", { text: n })));
+    box.append(el("details", {}, el("summary", { text: "Detail" }), ul));
+  }
+  return box;
+}
+function render(data) {
+  const rows = $("#rows"); rows.replaceChildren();
+  $("#empty").hidden = data.jobs.length > 0;
+  const open = new Set([...document.querySelectorAll("details[data-id][open]")].map((d) => d.dataset.id));
+  for (const job of data.jobs) {
+    const r = job.result, done = job.status === "done";
+    const pct = done && r ? r.saved_pct : null;
+    const name = el("td", { class: "name" }, document.createTextNode(job.name));
+    if (done && r && r.output_name && r.output_name !== job.name) name.append(el("small", { text: "→ " + r.output_name }));
+    const pctCell = el("td", {});
+    if (pct !== null && r.status !== "error")
+      pctCell.append(el("span", { class: "pct " + (pct > 0 ? "ok" : pct < 0 ? "neg" : "zero"), text: (pct > 0 ? "−" : pct < 0 ? "+" : "") + Math.abs(pct).toFixed(1) + "%" }));
+    const actions = el("td", {}, el("div", { class: "actions" }));
+    if (done && r && r.output && r.status !== "error") {
+      actions.firstChild.append(
+        el("a", { class: "btn primary", href: "/api/download/" + job.id, text: "Download" }),
+        el("button", { type: "button", text: "Lihat di Finder", onclick: () => api("/api/reveal/" + job.id, { method: "POST" }).catch((e) => toast(e.message)) }));
+    }
+    const st = statusCell(job);
+    const det = st.querySelector("details"); if (det) { det.dataset.id = job.id; if (open.has(job.id)) det.open = true; }
+    rows.append(el("tr", {},
+      name,
+      el("td", { class: "num", text: human(job.size) }),
+      el("td", { class: "num", text: done && r && r.status !== "error" ? human(r.size_after) : "—" }),
+      pctCell, el("td", {}, st), actions));
+  }
+  const t = data.total;
+  if (!data.jobs.length) $("#total").textContent = "Belum ada file.";
+  else if (data.active) $("#total").textContent = `Memproses… ${data.jobs.length - data.active} dari ${data.jobs.length} file selesai.`;
+  else {
+    $("#total").replaceChildren(document.createTextNode("Total: "), el("b", { text: `${t.before_h} → ${t.after_h}` }),
+      document.createTextNode(` · hemat ${t.saved_h} (${t.saved_pct}%)`));
+  }
+}
+async function poll(force) {
+  clearTimeout(timer);
+  try {
+    const data = await api("/api/jobs");
+    render(data);
+    timer = setTimeout(poll, data.active || force ? 450 : 2500);
+  } catch (e) { timer = setTimeout(poll, 2000); }
+}
+$("#open").addEventListener("click", () => api("/api/open-folder", { method: "POST" }).catch((e) => toast(e.message)));
+$("#clear").addEventListener("click", async () => { await api("/api/clear", { method: "POST" }); poll(); });
+
+// ---- info awal: dependency & folder output
+(async () => {
+  try {
+    const info = await api("/api/info");
+    $("#foot").textContent = `Compressor ${info.version} · hasil disimpan di ${info.output_dir} dengan akhiran _compressed`;
+    const miss = info.deps.filter((d) => !d.ok);
+    if (miss.length) {
+      const box = $("#deps"); box.hidden = false;
+      box.append(el("b", { text: "Beberapa komponen belum terpasang — aplikasi tetap jalan, tapi fiturnya terbatas:" }));
+      const ul = el("ul");
+      miss.forEach((d) => ul.append(el("li", {}, document.createTextNode(`${d.name} (${d.required_for}) → `), el("code", { text: d.install }))));
+      box.append(ul);
+    }
+  } catch (e) { toast("Tidak bisa menghubungi server lokal."); }
+  syncPreset(); poll();
+})();
+</script>
+</body>
+</html>

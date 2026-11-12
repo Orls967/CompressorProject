@@ -2,11 +2,12 @@
 
 Beberapa strategi dijalankan, lalu yang terkecil DAN lolos validasi dipakai:
 
-  pikepdf      kompres ulang tiap gambar langsung di dalam PDF (teks, vektor,
-               font, tautan, form, tag tidak disentuh) + optimasi struktur
-  gs-font      Ghostscript hanya untuk subset font & buang duplikat (gambar
-               dilewatkan apa adanya), lalu langkah pikepdf di atas
-  gs-penuh     Ghostscript men-downsample gambar sendiri, lalu langkah pikepdf
+  pikepdf        kompres ulang tiap gambar langsung di dalam PDF (teks, vektor,
+                 font, tautan, form, tag tidak disentuh) + optimasi struktur
+  pikepdf+gs     hasil di atas dilewatkan ke Ghostscript untuk subset font &
+                 buang duplikat (gambar diteruskan apa adanya)
+  gs-downsample  penyelamat: Ghostscript men-downsample semua gambar, dipakai
+                 kalau dua strategi di atas belum banyak mengecilkan file
 
 Teks dan vektor tidak pernah dirasterisasi oleh strategi mana pun.
 """
@@ -638,11 +639,10 @@ class Candidate:
     stats: ImageStats | None = None
 
 
-def compress_pdf(src: Path, dst: Path, settings: Settings, progress: Progress | None = None,
-                 strategies: list[str] | None = None) -> dict:
+def compress_pdf(src: Path, dst: Path, settings: Settings, progress: Progress | None = None) -> dict:
     """Tulis ``dst`` hanya kalau ada kandidat valid yang lebih kecil dari ``src``.
 
-    Mengembalikan dict: written, strategy, validation, candidates, notes.
+    Mengembalikan dict: written, strategy, validation, candidates, notes, detail.
     """
     def report(frac: float, msg: str) -> None:
         if progress:
@@ -661,55 +661,82 @@ def compress_pdf(src: Path, dst: Path, settings: Settings, progress: Progress | 
         notes.append("PDF bertanda tangan digital: tanda tangan tidak lagi valid setelah dikompres")
 
     lossy = not settings.lossless
-    want = strategies or (["pikepdf"] if not lossy else ["pikepdf", "gs-font", "gs-penuh"])
+    use_gs = lossy and deps.has("gs") and not encrypted
     if lossy and not deps.has("gs"):
-        want = [w for w in want if not w.startswith("gs")]
         notes.append("Ghostscript belum terpasang → hanya strategi pikepdf (pasang: brew install ghostscript)")
-    if encrypted:
-        want = [w for w in want if not w.startswith("gs")]
+        if settings.grayscale:
+            notes.append("Tanpa Ghostscript, grayscale hanya berlaku untuk gambar (teks/vektor tetap berwarna)")
+    elif lossy and encrypted:
         notes.append("PDF terenkripsi: Ghostscript dilewati supaya proteksi tetap ada")
-    if settings.grayscale and any(w.startswith("gs") for w in want):
-        # Hanya Ghostscript yang bisa mengubah warna teks/vektor jadi abu-abu.
-        want = [w for w in want if w.startswith("gs")]
-    elif settings.grayscale:
-        notes.append("Tanpa Ghostscript, grayscale hanya berlaku untuk gambar (teks/vektor tetap berwarna)")
 
     report(0.02, "menganalisis PDF")
     reference = validate.pdf_reference(src)
     cache: dict = {}
     candidates: list[Candidate] = []
+
     with tempfile.TemporaryDirectory(prefix="compressor_pdf_") as tmp:
         tmpd = Path(tmp)
-        span = 0.9 / max(1, len(want))
-        for i, label in enumerate(want):
-            base = 0.05 + i * span
-            out = tmpd / f"{label}.pdf"
 
-            def sub(f, m, _base=base, _label=label):
-                report(_base + f * span * 0.8, f"{_label}: {m}")
-
-            try:
-                if label == "pikepdf":
-                    stats = pikepdf_pass(src, out, settings, lossy, cache, sub)
-                else:
-                    report(base, f"{label}: Ghostscript")
-                    mid = tmpd / f"{label}_gs.pdf"
-                    if not ghostscript(src, mid, settings, downsample=(label == "gs-penuh")):
-                        notes.append(f"{label}: Ghostscript gagal memproses file ini")
-                        continue
-                    stats = pikepdf_pass(mid, out, settings, lossy, cache, sub)
-                    mid.unlink(missing_ok=True)
-            except Exception as e:
-                notes.append(f"{label}: gagal ({type(e).__name__}: {e})")
-                continue
-            cand = Candidate(label, out, out.stat().st_size, stats=stats)
-            report(base + span * 0.9, f"{label}: validasi")
-            cand.validation = validate.validate_pdf(src, out, reference=reference)
+        def add(label: str, path: Path, stats: ImageStats, frac: float) -> Candidate:
+            cand = Candidate(label, path, path.stat().st_size, stats=stats)
+            report(frac, f"{label}: validasi")
+            cand.validation = validate.validate_pdf(src, path, reference=reference)
             if not cand.validation.ok:
                 notes.append(f"{label}: ditolak — {cand.validation.reason}")
             candidates.append(cand)
+            return cand
+
+        # 1. pikepdf: gambar dikompres in-place, struktur dioptimasi.
+        first = tmpd / "pikepdf.pdf"
+        first_stats: ImageStats | None = None
+        try:
+            first_stats = pikepdf_pass(src, first, settings, lossy, cache,
+                                       lambda f, m: report(0.05 + f * 0.45, f"pikepdf: {m}"))
+            add("pikepdf", first, first_stats, 0.52)
+        except Exception as e:
+            notes.append(f"pikepdf: gagal ({type(e).__name__}: {e})")
+
+        # 2. pikepdf+gs: Ghostscript merapikan font (subset, duplikat) pada PDF
+        #    yang gambarnya SUDAH kecil → cepat. Gambar dilewatkan apa adanya.
+        if use_gs and first.exists():
+            try:
+                report(0.55, "pikepdf+gs: Ghostscript")
+                mid = tmpd / "gs_mid.pdf"
+                if ghostscript(first, mid, settings, downsample=False):
+                    out = tmpd / "pikepdf_gs.pdf"
+                    stats = pikepdf_pass(mid, out, settings, lossy, cache,
+                                         lambda f, m: report(0.65 + f * 0.1, f"pikepdf+gs: {m}"))
+                    add("pikepdf+gs", out, first_stats or stats, 0.78)
+                else:
+                    notes.append("pikepdf+gs: Ghostscript gagal memproses file ini")
+            except Exception as e:
+                notes.append(f"pikepdf+gs: gagal ({type(e).__name__}: {e})")
+
+        # 3. gs-downsample (penyelamat): kalau hasil sejauh ini masih besar,
+        #    kemungkinan ada gambar yang ukuran tampilnya tidak terbaca (inline
+        #    image, pola, anotasi). Ghostscript men-downsample semuanya.
+        valid = [c for c in candidates if c.validation and c.validation.ok]
+        best_so_far = min((c.size for c in valid), default=src_size)
+        if use_gs and settings.dpi > 0 and best_so_far > src_size * 0.6:
+            try:
+                report(0.8, "gs-downsample: Ghostscript")
+                mid = tmpd / "gs_full.pdf"
+                if ghostscript(src, mid, settings, downsample=True):
+                    out = tmpd / "gs_downsample.pdf"
+                    stats = pikepdf_pass(mid, out, settings, lossy, cache,
+                                         lambda f, m: report(0.88 + f * 0.06, f"gs-downsample: {m}"))
+                    add("gs-downsample", out, stats, 0.95)
+            except Exception as e:
+                notes.append(f"gs-downsample: gagal ({type(e).__name__}: {e})")
 
         valid = [c for c in candidates if c.validation and c.validation.ok]
+        if settings.grayscale and use_gs:
+            # Hanya kandidat yang lewat Ghostscript yang teks/vektornya ikut abu-abu.
+            gray = [c for c in valid if c.label != "pikepdf"]
+            if gray:
+                valid = gray
+            elif valid:
+                notes.append("Grayscale hanya diterapkan ke gambar (konversi Ghostscript gagal divalidasi)")
         result = {
             "written": False, "strategy": None, "validation": None, "notes": notes,
             "candidates": [{"label": c.label, "size": c.size,
