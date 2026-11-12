@@ -49,10 +49,11 @@ class Validation:
             parts.append(f"{self.count_after} {self.units}")
         if self.text_ratio is not None and self.text_before:
             parts.append(f"teks {self.text_ratio * 100:.0f}%")
-        elif self.text_before == 0:
+        elif self.text_before == 0 and self.units == "halaman":
             parts.append("tanpa lapisan teks")
         if self.ssim is not None:
             parts.append(f"kemiripan {self.ssim:.3f}")
+        parts.extend(self.notes)
         return "OK" + (" — " + ", ".join(parts) if parts else "")
 
     def to_dict(self) -> dict:
@@ -181,6 +182,138 @@ def pdf_reference(orig: Path, visual: bool = True) -> dict:
         n = len(d)
         d.close()
     return pdf_summary(orig, _sample_indices(n, VISUAL_PAGES) if visual else None)
+
+
+# ---------------------------------------------------------------------- Office
+
+_NS_REL = "http://schemas.openxmlformats.org/package/2006/relationships"
+_TEXT_TAGS = {
+    "word": "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t",
+    "ppt": "{http://schemas.openxmlformats.org/drawingml/2006/main}t",
+}
+_SKIP_COMPARE = re.compile(r"(^\[Content_Types\]\.xml$|\.rels$|^docProps/thumbnail\.|/media/)")
+
+
+def office_summary(path: Path) -> dict:
+    """Jenis dokumen, jumlah slide/sheet/paragraf, jumlah karakter teks, dan
+    hash tiap bagian XML."""
+    from lxml import etree
+    parser = etree.XMLParser(resolve_entities=False, no_network=True, huge_tree=True)
+    with zipfile.ZipFile(path) as z:
+        bad = z.testzip()
+        if bad:
+            raise RuntimeError(f"arsip rusak di {bad}")
+        names = [i.filename for i in z.infolist() if not i.is_dir()]
+        nameset = set(names)
+        kind = "word" if "word/document.xml" in nameset else \
+            "ppt" if "ppt/presentation.xml" in nameset else \
+            "xl" if "xl/workbook.xml" in nameset else "?"
+        hashes, chars, broken, images_bad = {}, 0, [], []
+        count, units = None, "bagian"
+        for n in names:
+            data = z.read(n)
+            if not _SKIP_COMPARE.search(n):
+                hashes[n] = hashlib.sha1(data).hexdigest()
+            if n.endswith(".rels"):
+                try:
+                    root = etree.fromstring(data, parser)
+                except etree.XMLSyntaxError:
+                    broken.append(f"{n} bukan XML yang valid")
+                    continue
+                d, f = n.rsplit("/", 1) if "/" in n else ("", n)
+                src_dir = d.rsplit("/_rels", 1)[0] if d.endswith("_rels") else d
+                src_dir = "" if src_dir == "_rels" else src_dir
+                for rel in root:
+                    if rel.get("TargetMode") == "External":
+                        continue
+                    target = rel.get("Target") or ""
+                    if target.startswith("/"):
+                        full = target.lstrip("/")
+                    else:
+                        import posixpath
+                        full = posixpath.normpath(posixpath.join(src_dir, target))
+                    if full and full not in nameset and "#" not in target and target != "NULL":
+                        broken.append(f"{n}: target hilang {target}")
+            elif n == "[Content_Types].xml" or n.endswith(".xml"):
+                try:
+                    root = etree.fromstring(data, parser)
+                except etree.XMLSyntaxError:
+                    broken.append(f"{n} bukan XML yang valid")
+                    continue
+                tag = _TEXT_TAGS.get(kind)
+                if tag and (n == "word/document.xml" or n.startswith("ppt/slides/slide")):
+                    chars += sum(len(e.text or "") for e in root.iter(tag))
+                if n == "word/document.xml":
+                    w = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p"
+                    count, units = sum(1 for _ in root.iter(w)), "paragraf"
+                if n == "xl/sharedStrings.xml" or n.startswith("xl/worksheets/sheet"):
+                    ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+                    chars += sum(len(e.text or "") for e in root.iter(f"{ns}t", f"{ns}v"))
+            elif "/media/" in n and data[:2] in (b"\xff\xd8", b"\x89P"):
+                try:
+                    with Image.open(io.BytesIO(data)) as im:
+                        im.verify()
+                except Exception:
+                    images_bad.append(n)
+        if kind == "ppt":
+            count = sum(1 for n in names if re.fullmatch(r"ppt/slides/slide\d+\.xml", n))
+            units = "slide"
+        elif kind == "xl":
+            count = sum(1 for n in names if re.fullmatch(r"xl/(work|chart)sheets/sheet\d+\.xml", n))
+            units = "sheet"
+    return {"kind": kind, "count": count, "units": units, "chars": chars, "hashes": hashes,
+            "broken": broken, "images_bad": images_bad}
+
+
+def _open_with_library(path: Path, kind: str) -> str | None:
+    """Coba buka dengan pustaka Office; kembalikan pesan error kalau gagal."""
+    try:
+        if kind == "word":
+            import docx
+            docx.Document(str(path))
+        elif kind == "ppt":
+            import pptx
+            pptx.Presentation(str(path))
+        elif kind == "xl":
+            import openpyxl
+            openpyxl.load_workbook(str(path), read_only=True).close()
+    except ImportError:
+        return None
+    except Exception as e:
+        return f"{type(e).__name__}: {e}"
+    return None
+
+
+def validate_office(orig: Path, new: Path) -> Validation:
+    v = Validation()
+    try:
+        before = office_summary(orig)
+        after = office_summary(new)
+    except Exception as e:
+        return v.fail(f"output tidak bisa dibuka ({type(e).__name__}: {e})")
+    v.units = after["units"]
+    v.count_before, v.count_after = before["count"], after["count"]
+    v.text_before, v.text_after = before["chars"], after["chars"]
+    v.text_ratio = (after["chars"] / before["chars"]) if before["chars"] else None
+    if after["kind"] != before["kind"]:
+        return v.fail("jenis dokumen berubah")
+    new_broken = [b for b in after["broken"] if b not in before["broken"]]
+    if new_broken:
+        return v.fail(new_broken[0])
+    if after["images_bad"]:
+        return v.fail(f"gambar rusak: {after['images_bad'][0]}")
+    if before["count"] != after["count"]:
+        return v.fail(f"jumlah {v.units} berubah ({before['count']} → {after['count']})")
+    if before["chars"] != after["chars"]:
+        return v.fail("teks dokumen berubah")
+    changed = [n for n, h in before["hashes"].items() if after["hashes"].get(n) != h]
+    if changed:
+        return v.fail(f"isi dokumen berubah di {changed[0]}")
+    err = _open_with_library(new, after["kind"])
+    if err and not _open_with_library(orig, before["kind"]):
+        return v.fail(f"output tidak bisa dibuka ({err})")
+    v.notes.append("isi identik dengan aslinya")
+    return v
 
 
 # ---------------------------------------------------------------------- gambar
